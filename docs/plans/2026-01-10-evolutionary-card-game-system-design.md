@@ -14,6 +14,14 @@ Build a production-ready system that uses genetic algorithms and Monte Carlo sim
 - Track full experiment history for reproducibility and analysis
 - Generate human-readable rules via LLM for playtesting
 
+### Scope: Simple Card Games
+
+**Design Decision (2026-01-10):** Focus on **shedding, matching, trick-taking, and set collection games** (Crazy 8s, War, Rummy families).
+
+**Excludes:** Betting/resource games (poker, blackjack) - these require significantly more complex schema (BettingPhase, chip tracking, hand evaluation) that would add 30%+ complexity and reduce evolutionary effectiveness. See `docs/poker-analysis.md` for detailed analysis.
+
+**Rationale:** Evolution excels at discovering novel rule combinations in games with simple mechanics. Poker-like games are outliers that require hardcoded logic (hand rankings) defeating the purpose of evolution.
+
 ## Technology Stack
 
 - **Primary Language:** Python 3.11+ (orchestration, evolution, fitness evaluation)
