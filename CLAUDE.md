@@ -69,6 +69,83 @@ When implementing, follow this sequence:
 
 **Rationale:** Despite modest speedup on simple War game, Golang provides measurable performance benefit. More complex simulations (MCTS, deep game trees) will show greater advantages. CGo chosen for tight integration without serialization overhead, critical for millions of evolutionary iterations.
 
+### Golang Performance Core (Phase 3)
+
+**Architecture:** Python→Flatbuffers→CGo→Go
+
+**Implementation Status:** Core architecture complete, simulation logic in progress
+
+**Components Implemented:**
+1. **Bytecode Compiler** (`src/cards_evolve/genome/bytecode.py`)
+   - Compiles GameGenome to 36-byte header + phase data
+   - OpCodes for conditions (0-19), actions (20-39), control flow (40-49), operators (50-55)
+   - War genome compiles to 77 bytes
+   - Deterministic compilation (same genome = same bytecode)
+
+2. **Flatbuffers Schema** (`schema/simulation.fbs`)
+   - Zero-copy binary serialization for Python↔Go
+   - BatchRequest/BatchResponse for bulk simulation
+   - Supports Random/Greedy/MCTS AI types (100/500/1000/2000 iterations)
+
+3. **CGo Bridge** (`src/gosim/cgo/bridge.go`, `src/cards_evolve/bindings/cgo_bridge.py`)
+   - `libcardsim.so` shared library (1.8MB)
+   - `SimulateBatch` entry point for batch processing
+   - Memory management via `FreeCString`
+   - Built with: `make build-cgo`
+
+4. **Mutable GameState** (`src/gosim/engine/types.go`)
+   - sync.Pool memory pooling for zero-allocation reuse
+   - Card, PlayerState, GameState types with betting extensions
+   - DrawCard, PlayCard, ShuffleDeck operations
+   - Clone() for tree search
+   - 3/3 unit tests passing
+
+5. **Genome Interpreter** (`src/gosim/engine/bytecode.go`, `conditions.go`, `movegen.go`)
+   - ParseGenome extracts header + phases + win conditions
+   - EvaluateCondition handles hand size, location size, card rank/suit, betting
+   - GenerateLegalMoves produces move list for current phase
+   - ApplyMove mutates state in-place
+   - CheckWinConditions returns winner ID
+   - 7/7 unit tests passing
+
+6. **MCTS Engine** (`src/gosim/mcts/node.go`, `search.go`)
+   - MCTSNode with sync.Pool memory pooling
+   - UCB1 selection algorithm (configurable exploration parameter)
+   - Selection → Expansion → Simulation → Backpropagation
+   - Returns most-visited child as best move
+   - Benchmark: ~3ms per search (100 iterations)
+   - 8/8 unit tests passing
+
+7. **Batch Simulation Engine** (`src/gosim/simulation/runner.go`)
+   - RunBatch: Execute N games with same genome/AI config
+   - Random AI: Uniform selection from legal moves
+   - Greedy AI: Heuristic-based move scoring
+   - MCTS AI: Tree search with configurable iterations
+   - Aggregated statistics: wins, avg/median turns, duration
+   - Turn limit protection against infinite loops
+
+8. **Golden Test Suite** (`tests/integration/test_bytecode_equivalence.py`, `src/gosim/engine/bytecode_test.go`)
+   - Python bytecode compilation tests (5 passing)
+   - Go bytecode parsing tests (4 passing)
+   - `tests/golden/war_genome.bin` (77 bytes) validates Python↔Go equivalence
+   - Determinism verification
+
+**Performance Status:**
+- MCTS benchmark: ~3ms per search (100 iterations) on Intel N100
+- Full end-to-end benchmark pending simulation logic fixes
+
+**Known Issues:**
+- War simulation ending prematurely with "no legal moves"
+- Move generation for PlayPhase needs validation fixes
+- Integration tests require Python environment setup fixes
+
+**Next Steps:**
+1. Debug War simulation move generation logic
+2. Verify win condition triggers correctly
+3. Run full end-to-end benchmark suite
+4. Compare Python vs Go performance on 1000+ game batches
+5. Validate MCTS vs Random AI skill differential
+
 ## Development Commands
 
 ### Run Tests
@@ -82,13 +159,28 @@ uv run pytest tests/unit/test_specific.py -v  # Single file
 **Golang:**
 ```bash
 cd src/gosim
-go test ./game -v
-go test ./game -bench=. -benchtime=10s
+go test ./engine -v
+go test ./mcts -v
+go test ./simulation -v
+
+# Benchmarks
+go test ./mcts -bench=. -benchtime=3s
+go test ./simulation -bench=. -benchtime=10s
+```
+
+### Build CGo Library
+
+```bash
+make build-cgo  # Builds libcardsim.so
 ```
 
 ### Benchmarks
 
 ```bash
+# Phase 3: Golang performance core
+uv run python benchmarks/benchmark_golang.py
+
+# Phase 1: Python vs Go comparison
 uv run python benchmarks/compare_war.py
 ```
 
