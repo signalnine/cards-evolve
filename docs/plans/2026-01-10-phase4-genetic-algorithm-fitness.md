@@ -4,8 +4,8 @@
 **Phase:** 4 of 4
 **Goal:** Implement genetic algorithm to evolve novel card games optimized for fun and playability
 
-**Consensus Input:** Single-agent analysis (Codex) - provisional recommendations
-**Confidence Level:** Medium (limited cross-validation, empirical tuning required)
+**Consensus Input:** Multi-agent consensus (Claude, Gemini, Codex) - high confidence on critical fixes
+**Confidence Level:** High (unanimous agreement on architecture, parameter tuning expected)
 
 ## Overview
 
@@ -27,21 +27,30 @@ Phase 4 implements the evolutionary loop that generates novel card games by:
 ✅ **Validity checking multi-stage** - Schema validation + simulation testing
 ✅ **Progressive evaluation strategy** - Cheap tests first, expensive tests for survivors
 
-### Provisional Decisions (Empirical Tuning Required)
+### Consensus Recommendations (Updated Based on Multi-Agent Review)
 
-⚠️ **Population size: 100** - Balance diversity vs. computational cost
-⚠️ **Seed population: 70% known games, 30% random** - Avoid pure random start
-⚠️ **Tournament selection (size 3-5)** - Simple, effective baseline
-⚠️ **10% elitism** - Preserve best performers
-⚠️ **Fitness weighting: start equal** - Calibrate after 10-20 generations
-⚠️ **100 generations with plateau detection** - Adaptive stopping
+✅ **Population size: 100 (monitor diversity)** - Start at 100, increase to 200-300 if premature convergence
+✅ **Seed population: 70% known games, 30% random** - Avoid pure random start
+✅ **Tournament selection (size 3)** - Simple, effective baseline
+✅ **10% elitism** - Preserve best performers
+✅ **Session length as constraint** - Filter games outside 3-20 minute range (fitness = 0)
+✅ **Diversity mechanism required** - Track genome distance, log per generation
+✅ **Plateau detection: 30 generations** - Extended from 20 based on consensus review
+✅ **100 generations with adaptive stopping** - Early termination if diversity collapses or plateau detected
 
-### Critical Gaps Identified
+### Must Address Before Implementation (From Consensus Review)
 
-❌ **Concrete mutation operators** - Need dataclass-specific implementations
-❌ **Crossover semantics** - Structured genome crossover unclear
-❌ **Infinite loop detection** - Stalemate/timeout mechanisms needed
-❌ **Human evaluation integration** - Proxy metrics may not capture "fun"
+❌ **Simulation failure handling** - Genomes that crash/timeout/infinite-loop need fitness = 0
+❌ **Session length as constraint** - Move from averaged metric to filter (3-20 min range)
+❌ **Win-condition mutation operator** - Win conditions are crucial, need dedicated mutation
+❌ **Diversity mechanism** - Explicit genome distance tracking and logging
+
+### Implementation Notes
+
+✅ **Concrete mutation operators** - 6 mutation types implemented (see Task 1)
+✅ **Crossover semantics** - Semantic phase-boundary crossover (see Task 1)
+✅ **Infinite loop detection** - max_turns validation + repair (Phase 3.5)
+⚠️ **Human evaluation integration** - Deferred to post-MVP, proxy metrics validated first
 
 ---
 
@@ -273,6 +282,42 @@ class AddSpecialEffectMutation(MutationOperator):
         return replace(genome, special_effects=effects)
 
 
+class ModifyWinConditionMutation(MutationOperator):
+    """Modify win conditions (critical design element)."""
+
+    def mutate(self, genome: GameGenome) -> GameGenome:
+        win_conditions = list(genome.win_conditions)
+
+        if not win_conditions:
+            # Add default win condition if missing
+            new_condition = WinCondition(type="empty_hand")
+            return replace(genome, win_conditions=[new_condition])
+
+        # Pick random win condition to modify
+        idx = random.randint(0, len(win_conditions) - 1)
+        condition = win_conditions[idx]
+
+        # Change win condition type
+        new_type = random.choice([
+            "empty_hand",
+            "point_threshold",
+            "capture_goal",
+            "first_to_X"
+        ])
+
+        # If type requires a threshold, set one
+        if new_type in ["point_threshold", "first_to_X"]:
+            new_condition = WinCondition(
+                type=new_type,
+                value=random.choice([50, 100, 150, 200, 500])
+            )
+        else:
+            new_condition = WinCondition(type=new_type)
+
+        win_conditions[idx] = new_condition
+        return replace(genome, win_conditions=win_conditions)
+
+
 def create_mutation_pipeline(rates: dict = None) -> List[MutationOperator]:
     """Create standard mutation pipeline with configurable rates."""
     default_rates = {
@@ -282,6 +327,7 @@ def create_mutation_pipeline(rates: dict = None) -> List[MutationOperator]:
         'remove_phase': 0.1,
         'modify_condition': 0.2,
         'add_special_effect': 0.05,
+        'modify_win_condition': 0.1,  # NEW: win conditions are critical
     }
 
     rates = {**default_rates, **(rates or {})}
@@ -293,6 +339,7 @@ def create_mutation_pipeline(rates: dict = None) -> List[MutationOperator]:
         RemovePhaseMutation(rates['remove_phase']),
         ModifyConditionMutation(rates['modify_condition']),
         AddSpecialEffectMutation(rates['add_special_effect']),
+        ModifyWinConditionMutation(rates['modify_win_condition']),  # NEW
     ]
 
 
@@ -317,6 +364,7 @@ def mutate_genome(genome: GameGenome, mutation_rate: float = 1.0) -> GameGenome:
         'remove_phase': 0.1 * mutation_rate,
         'modify_condition': 0.2 * mutation_rate,
         'add_special_effect': 0.05 * mutation_rate,
+        'modify_win_condition': 0.1 * mutation_rate,  # NEW
     }
 
     pipeline = create_mutation_pipeline(adjusted_rates)
@@ -513,6 +561,7 @@ Mutation operators:
 - RemovePhaseMutation: delete random phase
 - ModifyConditionMutation: change operators/values in conditions
 - AddSpecialEffectMutation: add card-triggered effects
+- ModifyWinConditionMutation: mutate win condition types and thresholds (NEW)
 
 Crossover:
 - Semantic single-point crossover on turn structure phases
@@ -693,6 +742,30 @@ class FitnessEvaluator:
                         use_mcts: bool) -> FitnessMetrics:
         """Compute fitness metrics from simulation results."""
 
+        # SESSION LENGTH AS CONSTRAINT (not averaged metric)
+        # Assume 1 turn = 2 seconds for human play
+        estimated_duration_sec = results.avg_turns * 2
+        target_min = 3 * 60   # 3 minutes
+        target_max = 20 * 60  # 20 minutes
+
+        # Filter: games outside range get fitness = 0
+        if estimated_duration_sec < target_min or estimated_duration_sec > target_max:
+            return FitnessMetrics(
+                decision_density=0.0,
+                comeback_potential=0.0,
+                tension_curve=0.0,
+                interaction_frequency=0.0,
+                rules_complexity=0.0,
+                session_length=0.0,  # Failed constraint
+                skill_vs_luck=0.0,
+                total_fitness=0.0,
+                games_simulated=results.total_games,
+                valid=False  # Failed constraint
+            )
+
+        # Normalize session length for reporting (passed constraint)
+        session_length_normalized = 1.0 - abs(estimated_duration_sec - 600) / 600
+
         # 1. Decision density (placeholder - needs instrumentation)
         # Estimate: more phases = more decisions
         decision_density = min(1.0, len(genome.turn_structure.phases) / 5.0)
@@ -721,33 +794,28 @@ class FitnessEvaluator:
         # Normalize to 0-1 (simpler = higher score)
         rules_complexity = max(0.0, 1.0 - complexity / 20.0)
 
-        # 6. Session length (target: 5-15 minutes)
-        # Assume 1 turn = 2 seconds for human play
-        estimated_duration_sec = results.avg_turns * 2
-        target_duration = 600  # 10 minutes
-        # Penalize too short or too long
-        duration_delta = abs(estimated_duration_sec - target_duration) / target_duration
-        session_length = max(0.0, 1.0 - duration_delta)
-
-        # 7. Skill vs luck (only if MCTS used)
+        # 6. Skill vs luck (only if MCTS used)
         skill_vs_luck = 0.5  # Neutral if not measured
         if use_mcts:
             # TODO: Compare MCTS win rate vs random baseline
             skill_vs_luck = 0.6  # Placeholder
 
-        # Check validity
+        # Check validity (simulation errors OR failed constraint)
         valid = results.errors == 0 and results.total_games > 0
 
-        # Compute weighted total
+        # Compute weighted total (ONLY 6 metrics, session length is constraint)
+        # Renormalize weights to sum to 1.0 without session_length
         total_fitness = (
             self.weights['decision_density'] * decision_density +
             self.weights['comeback_potential'] * comeback_potential +
             self.weights['tension_curve'] * tension_curve +
             self.weights['interaction_frequency'] * interaction_frequency +
             self.weights['rules_complexity'] * rules_complexity +
-            self.weights['session_length'] * session_length +
             self.weights['skill_vs_luck'] * skill_vs_luck
         )
+
+        # Renormalize to [0, 1] (compensate for missing session_length weight)
+        total_fitness = total_fitness * 7.0 / 6.0
 
         return FitnessMetrics(
             decision_density=decision_density,
@@ -755,7 +823,7 @@ class FitnessEvaluator:
             tension_curve=tension_curve,
             interaction_frequency=interaction_frequency,
             rules_complexity=rules_complexity,
-            session_length=session_length,
+            session_length=session_length_normalized,  # For reporting only
             skill_vs_luck=skill_vs_luck,
             total_fitness=total_fitness,
             games_simulated=results.total_games,
@@ -1052,14 +1120,14 @@ uv run pytest tests/evolution/test_fitness.py -v
 ```
 Implement progressive fitness evaluation system
 
-Fitness metrics (7 proxies for fun):
+Fitness metrics (6 aggregated + 1 constraint):
 1. Decision density: meaningful choices vs forced plays
 2. Comeback potential: game balance (win rate ~0.5)
 3. Tension curve: variance in win probability over time
 4. Interaction frequency: actions affecting opponents
 5. Rules complexity: inverse complexity (simpler = higher)
-6. Session length: target 5-15 minutes
-7. Skill vs luck: MCTS win rate delta vs random
+6. Skill vs luck: MCTS win rate delta vs random
+7. Session length: CONSTRAINT (3-20 min range, fitness=0 if failed)
 
 Features:
 - FitnessCache: hash-based caching (genomes are deterministic)
@@ -1178,22 +1246,78 @@ class Population:
 
     def _compute_diversity(self) -> float:
         """
-        Compute population diversity metric.
+        Compute population diversity metric using genome distance.
 
-        Measures variety in turn structure phase counts.
+        Uses Hamming distance on structural features (phase counts, effect counts, etc.).
         Higher = more diverse, Lower = converged
         """
-        phase_counts = [len(ind.genome.turn_structure.phases) for ind in self.individuals]
-
-        if not phase_counts:
+        if len(self.individuals) < 2:
             return 0.0
 
-        # Variance in phase counts as diversity proxy
-        avg = sum(phase_counts) / len(phase_counts)
-        variance = sum((x - avg) ** 2 for x in phase_counts) / len(phase_counts)
+        # Compute pairwise distances (sample to avoid O(n²) for large populations)
+        sample_size = min(50, len(self.individuals))
+        import random
+        sampled = random.sample(self.individuals, sample_size)
 
-        # Normalize to 0-1
-        return min(1.0, variance / 4.0)  # Variance of 4 = diversity score 1.0
+        total_distance = 0.0
+        num_pairs = 0
+
+        for i in range(len(sampled)):
+            for j in range(i + 1, len(sampled)):
+                total_distance += genome_distance(sampled[i].genome, sampled[j].genome)
+                num_pairs += 1
+
+        if num_pairs == 0:
+            return 0.0
+
+        # Average pairwise distance
+        avg_distance = total_distance / num_pairs
+
+        return avg_distance  # Already in [0, 1] range
+
+
+def genome_distance(g1: GameGenome, g2: GameGenome) -> float:
+    """
+    Compute structural distance between two genomes.
+
+    Uses Hamming distance on key structural features.
+    Returns value in [0, 1] range (0 = identical, 1 = maximally different).
+    """
+    distance = 0.0
+    total_features = 0
+
+    # Phase count difference (normalized)
+    phase_diff = abs(len(g1.turn_structure.phases) - len(g2.turn_structure.phases))
+    distance += min(1.0, phase_diff / 5.0)
+    total_features += 1
+
+    # Special effects count difference
+    effect_diff = abs(len(g1.special_effects) - len(g2.special_effects))
+    distance += min(1.0, effect_diff / 3.0)
+    total_features += 1
+
+    # Win conditions count difference
+    win_diff = abs(len(g1.win_conditions) - len(g2.win_conditions))
+    distance += min(1.0, win_diff / 2.0)
+    total_features += 1
+
+    # Cards per player difference
+    cards_diff = abs(g1.setup.cards_per_player - g2.setup.cards_per_player)
+    distance += min(1.0, cards_diff / 13.0)  # Normalize by half deck
+    total_features += 1
+
+    # Max turns difference
+    turns_diff = abs(g1.max_turns - g2.max_turns)
+    distance += min(1.0, turns_diff / 500.0)  # Normalize by typical range
+    total_features += 1
+
+    # Player count difference
+    player_diff = abs(g1.player_count - g2.player_count)
+    distance += min(1.0, player_diff / 4.0)  # Normalize by max player range
+    total_features += 1
+
+    # Average distance across all features
+    return distance / total_features
 
     @classmethod
     def create_initial_population(cls,
@@ -1479,7 +1603,12 @@ Seed genomes:
 
 Statistics:
 - avg_fitness, max_fitness, min_fitness
-- population diversity (variance in phase counts)
+- population diversity (genome distance via Hamming distance on structural features)
+
+Diversity tracking (NEW):
+- genome_distance(): computes structural distance on 6 features (phases, effects, win conditions, cards, turns, players)
+- Pairwise distance averaging (sampled for performance)
+- Warning when diversity < 0.1 (premature convergence risk)
 
 Testing:
 - Initial population creation
@@ -1519,7 +1648,7 @@ class EvolutionConfig:
     mutation_rate: float = 1.0
     tournament_size: int = 3
     seed_ratio: float = 0.7
-    plateau_threshold: int = 20  # Generations without improvement for early stopping
+    plateau_threshold: int = 30  # Generations without improvement for early stopping (consensus: extended from 20)
 
 
 @dataclass
@@ -1592,6 +1721,10 @@ class EvolutionEngine:
                   f"max={stats.max_fitness:.3f} "
                   f"diversity={stats.diversity:.3f} "
                   f"({gen_time:.1f}s)")
+
+            # Diversity warning (consensus: monitor for premature convergence)
+            if stats.diversity < 0.1:
+                print(f"⚠️  WARNING: Low diversity ({stats.diversity:.3f}) - consider increasing population size")
 
             # Callbacks
             for callback in self.callbacks:
@@ -1809,7 +1942,8 @@ EvolutionEngine:
 - Tournament selection for parent pairs
 - Crossover (70% rate) + mutation (100% rate)
 - Validation and repair of offspring
-- Early stopping: plateau detection (20 generations without 1% improvement)
+- Early stopping: plateau detection (30 generations without 1% improvement, extended from 20 per consensus)
+- Diversity monitoring: warnings when diversity < 0.1
 
 Breeding strategy:
 1. Elitism: copy best N% to next generation
@@ -2043,10 +2177,13 @@ Validation:
 
 ## Critical Gaps Addressed
 
+### From Original Plan
+
 ### 1. Concrete Mutation Operators ✅
-- Implemented 6 mutation types with dataclass-aware logic
+- Implemented 7 mutation types with dataclass-aware logic
 - Parameter tweaking, phase reordering, phase add/remove
 - Condition modification, special effect addition
+- **NEW: Win condition mutation** (consensus requirement)
 
 ### 2. Crossover Semantics ✅
 - Semantic single-point crossover on turn structure phases
@@ -2054,7 +2191,7 @@ Validation:
 - Generation counter incremented
 
 ### 3. Infinite Loop Detection ✅
-- max_turns validation (10 ≤ max_turns ≤ 10000)
+- max_turns validation (10 ≤ max_turns ≤ 10000) - **Phase 3.5**
 - Schema validation checks for stalemate conditions
 - Repair mechanism fixes invalid turn limits
 
@@ -2063,6 +2200,29 @@ Validation:
 - Proxy metrics established
 - CLI saves best genomes for manual playtesting
 - TODO: Add human rating collection system
+
+### From Consensus Review (Multi-Agent)
+
+### 5. Session Length as Constraint ✅
+- **Moved from averaged metric to filter**
+- Games outside 3-20 minute range get fitness = 0
+- Remaining 6 metrics renormalized
+
+### 6. Diversity Mechanism ✅
+- **genome_distance() function** using Hamming distance on 6 structural features
+- Pairwise distance averaging (sampled for O(n) performance)
+- Diversity logging per generation
+- Warning when diversity < 0.1
+
+### 7. Simulation Failure Handling ✅
+- Genomes with simulation errors get valid=False
+- Session length constraint failures get fitness=0
+- Invalid genomes filtered during evaluation
+
+### 8. Plateau Detection Extended ✅
+- **Extended from 20 to 30 generations** per consensus
+- 1% improvement threshold maintained
+- Adaptive early stopping
 
 ---
 
@@ -2111,19 +2271,31 @@ Once Phase 4 MVP is complete:
 
 ---
 
-## Notes on Provisional Consensus
+## Notes on Multi-Agent Consensus
 
-This plan was developed with limited multi-agent consensus (only 1 of 3 agents responded). Key decisions are based on:
+This plan incorporates **full multi-agent consensus** (Claude, Gemini, Codex - all 3 agents succeeded).
 
-- **Single agent (Codex) analysis**
-- **GA best practices from literature**
-- **Empirical tuning expected** for:
-  - Population size (50-200 range)
-  - Mutation rates (0.5-2.0 range)
-  - Tournament size (3-7 range)
-  - Fitness weights (equal start, calibrate later)
+### High-Confidence Decisions (Unanimous Agreement)
+- ✅ Progressive evaluation architecture (10 → 100 → MCTS)
+- ✅ Session length as constraint filter (not averaged metric)
+- ✅ Diversity mechanism required (genome distance + monitoring)
+- ✅ Plateau detection extended to 30 generations
+- ✅ Win-condition mutation operator critical
 
-**Action Required:** Monitor evolution results and adjust parameters based on:
-- Convergence speed (too fast = increase diversity mechanisms)
-- Fitness improvement (too slow = adjust selection pressure)
-- Genome validity (too many repairs = constrain mutations)
+### Parameters Requiring Empirical Tuning
+- **Population size:** Start at 100, increase to 200-300 if diversity < 0.1 persists
+- **Mutation rates:** Monitor effective mutation magnitude, reduce if fitness degrades
+- **Fitness weights:** Start equal (already normalized), recalibrate after 10-20 generations
+- **MCTS depth:** Explicit budgeting needed (verify minimum depth for skill measurement fits time budget)
+
+### Monitoring Requirements
+- **Diversity:** Log per generation, warn if < 0.1, increase population if collapse detected
+- **Repair frequency:** Audit repaired genomes to detect creativity collapse (falling back to War variants)
+- **Fitness trends:** Should generally improve or plateau (not degrade)
+- **Session length constraint:** Track rejection rate, adjust range if >50% filtered
+
+### Known Limitations (Accept for MVP)
+- **Proxy-to-fun gap:** Optimizing 7 metrics may not produce genuinely fun games
+- **Mitigation:** Add minimal human validation checkpoint (5-10 playtests on top genomes) post-MVP
+- **Genome repair risk:** May collapse novel-but-broken games into trivial defaults
+- **Mitigation:** Log all repairs, manually inspect high-repair genomes
