@@ -1,0 +1,47 @@
+// Flatbuffers schema for Python↔Go simulation interface
+namespace cardsim;
+
+// Single simulation request
+table SimulationRequest {
+  genome_bytecode: [ubyte] (required);  // Compiled genome from Python
+  num_games: uint32;                     // How many games to simulate
+  ai_player_type: ubyte;                 // 0=Random, 1=Greedy, 2=MCTS_Weak, 3=MCTS_Medium, 4=MCTS_Strong
+  mcts_iterations: uint32;               // Only used if ai_player_type >= 2
+  random_seed: uint64;                   // For reproducible results
+}
+
+// Batch of simulation requests
+table BatchRequest {
+  requests: [SimulationRequest] (required);
+  batch_id: uint64;
+}
+
+// Result for a single simulation
+table SimulationResult {
+  winner: int8;                // Player ID (0, 1) or -1 for draw/timeout
+  total_turns: uint32;
+  game_duration_ns: uint64;    // Nanoseconds (for profiling)
+  error_code: ubyte;           // 0=success, 1=invalid_genome, 2=timeout, 3=infinite_loop
+  error_message: string;       // Only set if error_code != 0
+}
+
+// Aggregated statistics for a genome
+table AggregatedStats {
+  total_games: uint32;
+  player0_wins: uint32;
+  player1_wins: uint32;
+  draws: uint32;
+  avg_turns: float;
+  median_turns: uint32;
+  avg_duration_ns: uint64;
+  errors: uint32;              // Count of failed simulations
+}
+
+// Batch response
+table BatchResponse {
+  batch_id: uint64;
+  results: [AggregatedStats] (required);  // One per request
+  total_duration_ns: uint64;
+}
+
+root_type BatchRequest;
