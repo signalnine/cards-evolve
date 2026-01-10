@@ -113,9 +113,84 @@ cards-evolve/
 │       └── game/              # Card game primitives
 ├── tests/
 │   ├── unit/                  # Unit tests
-│   └── integration/           # Integration tests
+│   ├── integration/           # Integration tests
+│   └── property/              # Property-based tests (Hypothesis)
 ├── benchmarks/                # Performance comparisons
 └── docs/
     ├── architecture/          # Architecture decisions
     └── plans/                 # Implementation plans
+```
+
+## Phase 2: Python Simulation Core Patterns
+
+### Immutability Patterns
+
+**Always use tuples for nested structures:**
+```python
+# ✅ Correct
+@dataclass(frozen=True)
+class GameState:
+    deck: tuple[Card, ...]
+    hands: tuple[tuple[Card, ...], ...]
+
+# ❌ Wrong - frozen wrapper around mutable list
+@dataclass(frozen=True)
+class GameState:
+    deck: list[Card]  # NOT immutable!
+```
+
+**Use copy_with for state transitions:**
+```python
+new_state = old_state.copy_with(
+    turn=old_state.turn + 1,
+    active_player=(old_state.active_player + 1) % 2
+)
+```
+
+### Interpreter Pattern
+
+**GenomeInterpreter converts data to logic (NOT code generation):**
+- Genomes are pure dataclasses
+- GameLogic instantiates based on genome fields
+- Safe for pickling across processes
+- No `exec()`, no security risks
+
+### Testing Strategies
+
+**Property-based tests with Hypothesis:**
+```python
+@given(seed=st.integers(min_value=0, max_value=10000))
+def test_determinism_property(seed: int) -> None:
+    result1 = engine.simulate_game(genome, players, seed)
+    result2 = engine.simulate_game(genome, players, seed)
+    assert result1.winner == result2.winner
+```
+
+**Sanity checks for metrics:**
+- War game should have decision_density ≈ 0.0
+- If not, metric calculation is broken
+
+### Two-Phase Fitness Evaluation
+
+**Phase 1 (cheap, all candidates):**
+- Game length, completion rate, decision branch factor
+
+**Phase 2 (expensive, top 10-20%):**
+- Tension curve, comeback potential (deferred to Phase 3)
+
+### Rank Comparison
+
+**Use numeric mapping for Rank enum:**
+```python
+# Rank enum values are strings ("A", "2", "K")
+# For comparison, use numeric mapping:
+RANK_VALUES = {
+    Rank.TWO: 2,
+    Rank.THREE: 3,
+    # ...
+    Rank.ACE: 14,  # Ace high
+}
+
+def get_rank_value(card: Card) -> int:
+    return RANK_VALUES[card.rank]
 ```
