@@ -30,6 +30,46 @@ Games are scored on measurable proxies for "fun":
 - Rules complexity and session length
 - Skill vs luck ratio (MCTS win rate vs random)
 
+## Performance and Parallelization
+
+The system implements **two-level parallelization** to maximize throughput on multi-core systems:
+
+### Go-Level Parallelization (Phase 3)
+- **Implementation:** Worker pool pattern in `src/gosim/simulation/parallel.go`
+- **Performance:** 1.43x average speedup on 4-core systems (1.61x with GreedyAI)
+- **Usage:** Call `RunBatchParallel()` instead of `RunBatchSimulation()`
+- **Optimal batch size:** 500-1000 games per evaluation
+- **Memory overhead:** < 0.5% (negligible)
+
+### Python-Level Parallelization (Phase 4)
+- **Implementation:** Process pool in `src/cards_evolve/evolution/parallel_fitness.py`
+- **Performance:** ~4x speedup on 4-core systems for population evaluation
+- **Usage:** Use `ParallelFitnessEvaluator` for evaluating multiple genomes
+- **Process-safe:** Each worker gets isolated Go simulator instance
+
+### Combined Performance
+- **Total speedup:** 3.3-4.0x end-to-end on 4-core systems
+- **Throughput:** 3,000-4,000 games/second
+- **Population (100 genomes):** ~25-30 seconds
+- **Full evolution (100 generations):** ~42-50 minutes
+
+### Performance Characteristics
+- **Embarrassingly parallel:** Simulations are independent
+- **Memory-bandwidth limited:** Speedup constrained by memory access, not computation
+- **Better scaling with complex AI:** GreedyAI and MCTS benefit more than RandomAI
+- **Negligible overhead:** Worthwhile even for small batches (100+ games)
+
+### Documentation
+- **Usage guide:** `docs/quickstart/parallelization-usage.md`
+- **Performance results:** `docs/benchmarks/parallelization-results.md`
+- **Strategy:** `docs/parallelization-strategy.md`
+- **Benchmarks:** `BENCHMARK_ANALYSIS.md`, `BENCHMARK_SUMMARY.md`
+
+### Recommended Configuration
+- Use default auto-detection for worker counts
+- Batch size: 1000 games for standard fitness evaluation
+- Monitor throughput (should be > 1,000 games/sec)
+
 ## Key Constraints
 
 All evolved games must be:
@@ -130,27 +170,38 @@ When implementing, follow this sequence:
    - `tests/golden/war_genome.bin` (77 bytes) validates Python↔Go equivalence
    - Determinism verification
 
-**Performance Status:**
-- MCTS benchmark: ~3ms per search (100 iterations) on Intel N100
-- Full end-to-end benchmark pending simulation logic fixes
+**Performance Status:** ✅ **COMPLETE - TARGET ACHIEVED**
 
-**Performance Results:**
-- War simulation: ~0.47ms per game (470μs)
-- Throughput: ~2,100 games/second on Intel N100
-- Average game length: 550-800 turns
-- All tests passing: ✅ Single game, ✅ Batch (10 games), ✅ Benchmark
+**Fair Comparison Results (100 games, genome-based):**
+- **Python:** 15.94ms per game (63 games/sec)
+- **Go:** 0.40ms per game (2,472 games/sec)
+- **Speedup:** **39.4x** ✅ (within 10-50x target range)
 
-**Known Issues:**
-- ~~War simulation ending prematurely~~ ✅ **FIXED** (added battle resolution logic)
-- Integration tests require Python environment setup fixes (pytest version mismatch)
-- Full Python→Go benchmark pending Python env fixes
+**Implementation Details:**
+- Both use genome interpreter stack (move generation, phase execution, battle resolution)
+- Python: `src/cards_evolve/simulation/movegen.py` - immutable state with `copy_with()`
+- Go: `src/gosim/engine/movegen.go` - mutable state with `sync.Pool`
+- MCTS search: ~3ms per 100 iterations
 
-**Next Steps:**
-1. ✅ ~~Debug War simulation~~ **COMPLETE**
-2. Run full end-to-end benchmark suite (pending Python env)
-3. Compare Python vs Go performance on 1000+ game batches
-4. Validate MCTS vs Random AI skill differential
-5. Proceed to Phase 4 (genetic algorithm)
+**Why Initial Benchmark Was Misleading:**
+- **Invalid comparison (0.2x):** Python direct War (0.07ms) vs Go genome-based (0.43ms)
+- **Valid comparison (39.4x):** Python genome-based (15.94ms) vs Go genome-based (0.40ms)
+- Lesson: Always compare equivalent architectures
+
+**Performance Benefits:**
+- Compiled native code vs interpreted Python
+- Memory pooling with `sync.Pool` (zero-allocation reuse)
+- Mutable state (in-place updates) vs immutable copies
+- Batching amortizes CGo overhead
+
+**Absolute Performance:** 2,472 games/sec sufficient for evolutionary workloads:
+- 1 million games ≈ 7 minutes
+- Batching of 50-100 games per CGo call
+- Can scale with parallelization if needed
+
+**Phase 3 Status:** ✅ **SUCCESS** - Target achieved, ready for Phase 4
+
+See `PHASE3_FINAL_RESULTS.md` for comprehensive analysis and `benchmarks/compare_genome_implementations.py` for fair benchmark.
 
 ## Development Commands
 
