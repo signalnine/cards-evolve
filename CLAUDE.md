@@ -134,17 +134,23 @@ When implementing, follow this sequence:
 - MCTS benchmark: ~3ms per search (100 iterations) on Intel N100
 - Full end-to-end benchmark pending simulation logic fixes
 
+**Performance Results:**
+- War simulation: ~0.47ms per game (470μs)
+- Throughput: ~2,100 games/second on Intel N100
+- Average game length: 550-800 turns
+- All tests passing: ✅ Single game, ✅ Batch (10 games), ✅ Benchmark
+
 **Known Issues:**
-- War simulation ending prematurely with "no legal moves"
-- Move generation for PlayPhase needs validation fixes
-- Integration tests require Python environment setup fixes
+- ~~War simulation ending prematurely~~ ✅ **FIXED** (added battle resolution logic)
+- Integration tests require Python environment setup fixes (pytest version mismatch)
+- Full Python→Go benchmark pending Python env fixes
 
 **Next Steps:**
-1. Debug War simulation move generation logic
-2. Verify win condition triggers correctly
-3. Run full end-to-end benchmark suite
-4. Compare Python vs Go performance on 1000+ game batches
-5. Validate MCTS vs Random AI skill differential
+1. ✅ ~~Debug War simulation~~ **COMPLETE**
+2. Run full end-to-end benchmark suite (pending Python env)
+3. Compare Python vs Go performance on 1000+ game batches
+4. Validate MCTS vs Random AI skill differential
+5. Proceed to Phase 4 (genetic algorithm)
 
 ## Development Commands
 
