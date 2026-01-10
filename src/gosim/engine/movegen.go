@@ -103,6 +103,11 @@ func ApplyMove(state *GameState, move *LegalMove, genome *Genome) {
 	case 2: // PlayPhase
 		if move.CardIndex >= 0 {
 			state.PlayCard(currentPlayer, move.CardIndex, move.TargetLoc)
+
+			// War-specific logic: if playing to tableau in 2-player game
+			if move.TargetLoc == LocationTableau && len(state.Players) == 2 {
+				resolveWarBattle(state)
+			}
 		}
 
 	case 3: // DiscardPhase
@@ -114,6 +119,37 @@ func ApplyMove(state *GameState, move *LegalMove, genome *Genome) {
 	// Advance turn
 	state.CurrentPlayer = 1 - state.CurrentPlayer
 	state.TurnNumber++
+}
+
+// resolveWarBattle handles War game card comparison
+func resolveWarBattle(state *GameState) {
+	// Check if both players have played (tableau has 2 cards)
+	if len(state.Tableau) == 0 || len(state.Tableau[0]) < 2 {
+		return
+	}
+
+	tableau := state.Tableau[0]
+	card1 := tableau[len(tableau)-2] // Second-to-last card (player 0's card)
+	card2 := tableau[len(tableau)-1] // Last card (player 1's card)
+
+	// Compare ranks (Ace high: A=12, K=11, ..., 2=0)
+	var winner uint8
+	if card1.Rank > card2.Rank {
+		winner = 0
+	} else if card2.Rank > card1.Rank {
+		winner = 1
+	} else {
+		// Tie - in simplified War, alternate who wins ties
+		winner = state.CurrentPlayer
+	}
+
+	// Winner takes all cards from tableau
+	for _, card := range tableau {
+		state.Players[winner].Hand = append(state.Players[winner].Hand, card)
+	}
+
+	// Clear tableau
+	state.Tableau[0] = state.Tableau[0][:0]
 }
 
 // CheckWinConditions evaluates win conditions, returns winner ID or -1
